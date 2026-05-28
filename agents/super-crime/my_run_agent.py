@@ -75,6 +75,10 @@ plt.savefig("plot.png")
     # 2. Design experiments and run code
     # 3. Analyze results
     # 4. Write paper sections
+    
+    MODEL_ID = 'global.anthropic.claude-opus-4-7'
+    
+    search_web(problem_domain)
 
     return Paper(
         title="",
