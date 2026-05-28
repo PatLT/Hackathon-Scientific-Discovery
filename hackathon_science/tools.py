@@ -8,7 +8,7 @@ import tempfile
 import os
 import base64
 import toml
-from duckduckgo_search import DDGS
+from ddgs import DDGS
 
 from hackathon_science.git_ops import load_papers
 

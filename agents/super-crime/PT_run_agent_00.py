@@ -63,10 +63,12 @@ def run(
         print(f"  [{score:>2}] {title[:80]}")
 
     # ------------------------------------------------------------------
-    # 2. Select top-12 most relevant results
+    # 2. Select top-12 web results
     # ------------------------------------------------------------------
-    n_top = min(12, len(search_results))
-    top_indices = np.argsort(score_results)[-n_top:]  # ascending → take tail
+    n_web  = len(search_results)
+    n_top  = min(12, n_web)
+    web_top_indices = set(np.argsort(score_results)[-n_top:].tolist())
+    top_indices     = web_top_indices   # will be extended in section 3
 
     # ------------------------------------------------------------------
     # 3. Load papers from papers_dir + ecosystem, score, take top 3, append to web
@@ -112,9 +114,46 @@ def run(
             score_results.append(score)
             print(f"  Added local paper: {result['title'][:80]}")
 
-        # Re-select top indices now that the lists are longer
-        n_top       = min(12, len(search_results))
-        top_indices = np.argsort(score_results)[-n_top:]
+        # top_indices = top-12 web (fixed from section 2) + indices of the
+        # appended local papers (always at the tail of search_results).
+        # This guarantees a top-15 list: web and local pools are kept separate.
+        local_indices = set(range(n_web, len(search_results)))
+        top_indices   = web_top_indices | local_indices
+
+    top_indices = sorted(top_indices)   # stable order for downstream sections
+    print(f"  Total papers in pool: {len(top_indices)} "
+          f"({len(web_top_indices)} web + {len(top_indices) - len(web_top_indices)} local)")
+
+    # ------------------------------------------------------------------
+    # 3c. Hardcoded paper — loaded from originator.pdf if present, otherwise
+    #     falls back to title-only. Added to pool for both hypothesis generation
+    #     and the final reference list (section 10 picks it up automatically).
+    # ------------------------------------------------------------------
+    _originator_snippet = ""
+    _originator_pdf = Path("originator.pdf")
+    if _originator_pdf.exists():
+        try:
+            import pypdf
+            reader = pypdf.PdfReader(str(_originator_pdf))
+            _originator_snippet = " ".join(
+                page.extract_text() or "" for page in reader.pages
+            )[:3000]
+            print(f"  Loaded originator.pdf ({len(_originator_snippet)} chars)")
+        except Exception as e:
+            print(f"  Could not read originator.pdf: {e}")
+    else:
+        print("  originator.pdf not found — using title only for Flow of Options")
+
+    HARDCODED_PAPER = {
+        "title":   "Flow of Options",
+        "snippet": _originator_snippet,
+        "url":     "https://arxiv.org/pdf/2502.12929",
+    }
+    hardcoded_idx = len(search_results)
+    search_results.append(HARDCODED_PAPER)
+    score_results.append(0)                        # score unused; index is always included
+    top_indices = sorted(top_indices + [hardcoded_idx])
+    print(f"  Hardcoded paper added at index {hardcoded_idx}: {HARDCODED_PAPER['title']}")
 
     # ------------------------------------------------------------------
     # 4. Summarise each top paper and generate a research question from it
@@ -145,14 +184,19 @@ def run(
                 f"a single sentence ending in a question mark:\n\n{paper_text[:1500]}"
             )
         else:
+            # Use the title and snippet already fetched by search_web —
+            # the LLM cannot access URLs directly
+            title   = res.get("title",   "")
+            snippet = res.get("snippet", "")
+            context = f"Title: {title}\n\nExcerpt: {snippet}" if snippet else f"Title: {title}"
             summary_prompt = (
-                f"Review this paper and return a brief, concise 2-sentence summary. "
-                f"Link: {url}"
+                f"Based on the following paper title and excerpt, return a brief, "
+                f"concise 2-sentence summary:\n\n{context}"
             )
             question_prompt = (
-                f"Review this paper and formulate a single, concise, scientific question "
-                f"arising from it. Return ONLY the question as a single sentence ending "
-                f"in a question mark. Link: {url}"
+                f"Based on the following paper title and excerpt, formulate a single, "
+                f"concise scientific question arising from it. Return ONLY the question "
+                f"as a single sentence ending in a question mark:\n\n{context}"
             )
 
         out_summary = call_llm(
@@ -231,6 +275,7 @@ def run(
     # run_code accepts raw LLM responses (including markdown fences) directly.
     # If execution fails, feed the error back to the LLM and retry up to 3 times.
     MAX_RETRIES = 3
+    final_code  = ""   # populated only on a successful run
     for attempt in range(1, MAX_RETRIES + 1):
         print(f"  Running experiment (attempt {attempt}/{MAX_RETRIES})...")
         code_output = run_code(code_text, filename="experiment.py")
@@ -238,6 +283,7 @@ def run(
 
         if not has_error(code_output):
             print("  Experiment ran successfully.")
+            final_code = extract_code(code_text)   # capture clean code at success
             break
 
         if attempt == MAX_RETRIES:
@@ -339,6 +385,8 @@ def run(
         title_r = res.get("title", "Unknown")
         url_r   = res.get("url",   "")
         references_lines.append(f"[{i}] {title_r}. {url_r}")
+
+
     references = "\n".join(references_lines)
 
     # ------------------------------------------------------------------
@@ -350,6 +398,6 @@ def run(
         methods=methods,
         results=results,
         references=references,
-        appendix="",
+        appendix=f"```python\n{final_code}\n```",
         tags=[],
     )
