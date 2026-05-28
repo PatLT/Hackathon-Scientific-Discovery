@@ -108,23 +108,39 @@ def in_scope(text: str, problem_domain: str, model_id: str) -> bool:
 
 
 def escape_latex_blocks(text: str) -> str:
-    """Escape backslashes inside LaTeX math blocks for web markdown rendering.
+    r"""Escape LaTeX math blocks for web markdown rendering.
 
-    Markdown parsers consume single backslashes before the math renderer sees
-    them, so e.g. $\\Omega(\\log t)$ arrives at MathJax/KaTeX as $Omega(log t)$.
-    The fix is to double every backslash inside $...$ and $$...$$ blocks so the
-    markdown parser passes them through as single backslashes to the renderer.
+    Markdown parsers run before math renderers (KaTeX/MathJax), causing two
+    problems inside $...$ and $$...$$ blocks:
 
-    Handles:
-        \\Omega  ->  \\\\Omega   (inside a math block; already-doubled left alone)
-        \\frac   ->  \\\\frac
-        \\\\frac ->  \\\\frac   (already escaped, no change)
+    1. Underscores are consumed as italic markers (_..._), breaking subscripts:
+         $v_{\text{domain}}$  →  $v{\text{domain}}$  (underscore eaten)
+       Fix: escape as \_ so markdown treats them as literal underscores, which
+       are then passed through as _ to the LaTeX renderer.
+
+    2. Single backslashes before LaTeX commands are consumed, breaking commands:
+         $\Omega$  →  $Omega$  (backslash eaten)
+       Fix: double each backslash so one survives markdown processing.
+
+    Order is critical: underscores must be escaped BEFORE backslashes are
+    doubled. If doubled first, the \\ in \_ would cause \\_ → \_ in markdown
+    (a backslash literal), leaving _ unprotected as an italic marker.
     """
     def _fix(match: re.Match) -> str:
         delim = match.group(1)   # '$$' or '$'
         inner = match.group(2)
-        # Double any backslash not already doubled
-        inner = re.sub(r'(?<!\\)\\(?!\\)', r'\\\\', inner)
+
+        # Step 1 — escape underscores not already escaped.
+        # Turns x_i → x\_i and v_{\text{}} → v\_{\text{}}
+        # (?<!\\) skips underscores already preceded by a backslash.
+        inner = re.sub(r'(?<!\\)_', r'\\_', inner)
+
+        # Step 2 — double backslashes before LaTeX letter-commands.
+        # Lookahead [A-Za-z] means \frac → \\frac but leaves \_ (from step 1)
+        # untouched since _ is not a letter.
+        # Lookbehind (?<!\\) avoids doubling already-doubled \\.
+        inner = re.sub(r'(?<!\\)\\(?=[A-Za-z])', r'\\\\', inner)
+
         return f'{delim}{inner}{delim}'
 
     # Match $$...$$ before $...$ so the longer delimiter wins
