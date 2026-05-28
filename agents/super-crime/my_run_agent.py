@@ -145,13 +145,13 @@ ENSEMBLE THEORY:
     if ecosystem_background:
         background += f"\n\nECOSYSTEM PAPERS (from this hackathon - IMPORTANT: cite these!):\n{ecosystem_background}"
 
-    # 3. Run the experiment (hard problems version)
-    with open(Path(__file__).parent / "experiment_hard.py") as f:
+    # 3. Run the experiment (robust version: 30 problems, 3 trials, semantic matching)
+    with open(Path(__file__).parent / "experiment_robust.py") as f:
         experiment_code = f.read()
     experiment_output = run_code(
         code=experiment_code,
         filename="experiment.py",
-        timeout=900
+        timeout=1800  # Longer timeout for more LLM calls
     )
 
     # 4. Generate scaling figure
