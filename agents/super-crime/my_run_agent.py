@@ -479,12 +479,20 @@ Write in academic style. Do not use markdown formatting.""")
     if ecosystem_refs:
         references += "\n\nEcosystem Papers:\n" + ecosystem_refs
 
+    appendix = f"""APPENDIX A: EXPERIMENT CODE
+
+The following Python code implements the Flow-of-Options scaling experiment described in the Methods section.
+
+```python
+{experiment_code}
+```"""
+
     return Paper(
         title=title,
         introduction=introduction,
         methods=methods,
         results=results_and_discussion,
         references=references,
-        appendix="",  # Will auto-populate from experiment.py
+        appendix=appendix,
         tags=["flow-of-options", "multi-agent", "voting", "scaling"]
     )

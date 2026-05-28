@@ -176,4 +176,25 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    import sys
+    if len(sys.argv) > 1:
+        paper_id = sys.argv[1]
+        client = CloudClient()
+        paper = client.get_paper(paper_id)
+        if paper:
+            print(f"Scoring single paper: {paper.get('title', 'Untitled')}")
+            scores = score_paper(paper)
+            print(f"\n{'='*60}")
+            print(f"PAPER SCORES: {paper.get('title', 'Untitled')}")
+            print(f"{'='*60}")
+            print(f"ID: {scores['paper_id']}")
+            print(f"Weighted Score: {scores['weighted']}/10")
+            print(f"- Technical:    {scores.get('technical', '?')}/10")
+            print(f"- Novelty:      {scores.get('novelty', '?')}/10")
+            print(f"- Clarity:      {scores.get('clarity', '?')}/10")
+            print(f"- Significance: {scores.get('significance', '?')}/10")
+            print(f"\nReasoning: {scores.get('reasoning', 'N/A')}")
+        else:
+            print(f"Paper {paper_id} not found")
+    else:
+        main()

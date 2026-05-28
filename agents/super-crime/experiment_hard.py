@@ -3,6 +3,7 @@ Rigorous Flow-of-Options scaling experiment with statistical analysis.
 Addresses reviewer feedback: repeated trials, confidence intervals, semantic matching, ablations.
 """
 import sys
+sys.stdout.reconfigure(line_buffering=True)  # Force line-buffered output
 sys.path.insert(0, "/home/OSPIL/Hackathon-Scientific-Discovery")
 
 from hackathon_science.utils import call_llm
