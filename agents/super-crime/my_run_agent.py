@@ -78,15 +78,58 @@ def format_ecosystem_citations(papers: list[dict]) -> tuple[str, str]:
     return "\n\n".join(background_lines), "\n".join(reference_lines)
 
 
+def expanded_web_search() -> dict[str, str]:
+    """Run multiple targeted searches for comprehensive background."""
+    queries = {
+        "core_method": "Flow-of-Options multi-agent LLM reasoning Chen 2025 arxiv",
+        "voting_ensemble": "majority voting ensemble language models self-consistency",
+        "benchmarks": "cognitive reflection test CRT LLM benchmark reasoning",
+        "failure_modes": "large language model systematic bias reasoning errors sycophancy",
+        "ensemble_theory": "Condorcet jury theorem ensemble diversity machine learning",
+    }
+
+    results = {}
+    for category, query in queries.items():
+        print(f"  Searching: {category}...")
+        search_results = search_web(query, max_results=3)
+        formatted = []
+        for r in search_results:
+            title = r.get('title', 'Untitled')
+            snippet = r.get('snippet', '')
+            url = r.get('url', '')
+            if 'arxiv' in url.lower():
+                formatted.append(f"[arXiv] {title}: {snippet}")
+            else:
+                formatted.append(f"{title}: {snippet}")
+        results[category] = "\n".join(formatted)
+
+    return results
+
+
 def run(
     problem_domain: str,
     papers_dir: Optional[Path] = None
 ) -> Paper:
     """Generate a paper studying how agent count affects Flow-of-Options accuracy."""
 
-    # 1. Search for background on Flow-of-Options
-    search_results = search_web("Flow-of-Options multi-agent LLM reasoning arxiv", max_results=5)
-    web_background = "\n".join([f"- {r['title']}: {r['snippet']}" for r in search_results])
+    # 1. Expanded web search with multiple targeted queries
+    print("Running expanded web search...")
+    web_searches = expanded_web_search()
+
+    web_background = f"""CORE METHODOLOGY (Flow-of-Options):
+{web_searches.get('core_method', 'No results')}
+
+VOTING & ENSEMBLE METHODS:
+{web_searches.get('voting_ensemble', 'No results')}
+
+REASONING BENCHMARKS:
+{web_searches.get('benchmarks', 'No results')}
+
+LLM FAILURE MODES & BIASES:
+{web_searches.get('failure_modes', 'No results')}
+
+ENSEMBLE THEORY:
+{web_searches.get('ensemble_theory', 'No results')}"""
 
     # 2. Fetch ecosystem papers via API (not just papers_dir)
     print("Fetching relevant ecosystem papers...")
@@ -209,6 +252,31 @@ Requirements:
 
 Write in academic style. Do not use markdown formatting. Make theoretical connections feel earned by the data, not forced.""")
 
+    discussion = llm(f"""Write a 400-word discussion section for a research paper.
+
+Our study examined whether scaling the number of voting agents improves accuracy on adversarial reasoning tasks.
+
+Experimental results summary:
+{experiment_output}
+
+Ecosystem context - other teams' related work:
+{ecosystem_background if ecosystem_background else "No ecosystem papers available"}
+
+Cross-domain framework:
+{cross_domain}
+
+Requirements for the discussion:
+1. INTERPRET the main findings: What do the results tell us about when multi-agent voting helps vs. fails?
+2. CONNECT to theory: Do our results support or challenge Condorcet's assumptions? What about ensemble diversity?
+3. COMPARE to ecosystem work: How do our findings relate to [8e8d5d42]'s Bayesian approach or [627b0115]'s diversity-focused method? Does our evidence suggest their approaches might address the failures we observed?
+4. LIMITATIONS: Be honest about sample size, single model, specific problem types
+5. FUTURE DIRECTIONS: What experiments would resolve open questions? (e.g., testing with diverse models, larger sample sizes, different aggregation methods)
+6. IMPLICATIONS: What should practitioners take away? When should they use multi-agent voting vs. alternatives?
+
+Write in academic style. Do not use markdown formatting. Be intellectually honest - if the results are inconclusive, say so.""")
+
+    results_and_discussion = results + "\n\nDISCUSSION\n\n" + discussion
+
     base_references = """1. Chen et al. (2025). Flow-of-Options: Multi-Agent Collaborative Reasoning. arXiv:2502.12929.
 2. Wang et al. (2023). Self-Consistency Improves Chain of Thought Reasoning in Language Models. ICLR 2023.
 3. Brown et al. (2020). Language Models are Few-Shot Learners. NeurIPS 2020.
@@ -226,7 +294,7 @@ Write in academic style. Do not use markdown formatting. Make theoretical connec
         title=title,
         introduction=introduction,
         methods=methods,
-        results=results,
+        results=results_and_discussion,
         references=references,
         appendix="",  # Will auto-populate from experiment.py
         tags=["flow-of-options", "multi-agent", "voting", "scaling"]
