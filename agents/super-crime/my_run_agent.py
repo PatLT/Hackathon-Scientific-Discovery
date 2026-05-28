@@ -4,7 +4,7 @@ Flow-of-Options Agent Scaling Study
 from pathlib import Path
 from typing import Optional
 from hackathon_science import Paper
-from hackathon_science.tools import run_code, search_web, get_paper, image_to_base64
+from hackathon_science.tools import run_code, search_web, get_paper
 from hackathon_science.utils import call_llm
 from hackathon_science.cloud_client import CloudClient
 
@@ -199,23 +199,16 @@ ENSEMBLE THEORY:
     if ecosystem_background:
         background += f"\n\nECOSYSTEM PAPERS (from this hackathon - IMPORTANT: cite these!):\n{ecosystem_background}"
 
-    # 3. Run the experiment (robust version: 30 problems, 3 trials, semantic matching)
-    with open(Path(__file__).parent / "experiment_robust.py") as f:
+    # 3. Run the experiment (expanded 30-problem benchmark)
+    with open(Path(__file__).parent / "experiment_hard.py") as f:
         experiment_code = f.read()
     experiment_output = run_code(
         code=experiment_code,
         filename="experiment.py",
-        timeout=1800  # Longer timeout for more LLM calls
+        timeout=1800
     )
 
-    # 4. Generate scaling figure
-    print("Generating scaling figure...")
-    with open(Path(__file__).parent / "figure_scaling.py") as f:
-        figure_code = f.read()
-    run_code(code=figure_code, filename="figure_scaling.py", timeout=900)
-    figure_md = image_to_base64("figure_scaling.png", "Figure 1: Scaling analysis")
-
-    # 5. Cross-domain theoretical background (hardcoded - these are established concepts)
+    # 4. Cross-domain theoretical background (hardcoded - these are established concepts)
     cross_domain = """
 CROSS-DOMAIN THEORETICAL FRAMEWORK:
 
@@ -248,7 +241,7 @@ SPECULATIVE FRAMING (use sparingly, for color):
    you cannot vote your way out of a shared delusion.
 """
 
-    # 6. Generate paper sections
+    # 5. Generate paper sections
     title = "When More Agents Help: Scaling Flow-of-Options on Adversarial Reasoning Tasks"
 
     introduction = llm(f"""Write a 500-word introduction for a research paper.
@@ -347,7 +340,7 @@ Requirements:
 
 Write in academic style. Do not use markdown formatting. Keep it punchy and memorable.""")
 
-    results_and_discussion = results + "\n\n" + figure_md + "\n\nDISCUSSION\n\n" + discussion + "\n\nCONCLUSION\n\n" + conclusion
+    results_and_discussion = results + "\n\nDISCUSSION\n\n" + discussion + "\n\nCONCLUSION\n\n" + conclusion
 
     base_references = """1. Chen et al. (2025). Flow-of-Options: Multi-Agent Collaborative Reasoning. arXiv:2502.12929.
 2. Wang et al. (2023). Self-Consistency Improves Chain of Thought Reasoning in Language Models. ICLR 2023.
