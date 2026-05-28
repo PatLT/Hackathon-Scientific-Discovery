@@ -62,23 +62,65 @@ def run(
         timeout=900
     )
 
-    # 4. Generate paper sections
+    # 4. Cross-domain theoretical background (hardcoded - these are established concepts)
+    cross_domain = """
+CROSS-DOMAIN THEORETICAL FRAMEWORK:
+
+1. CONDORCET JURY THEOREM (1785): If each voter has >50% chance of being correct and votes independently,
+   majority vote accuracy approaches 100% as group size increases. BUT if voters have <50% accuracy
+   or errors are correlated, adding voters can DECREASE accuracy.
+
+2. WISDOM OF CROWDS (Surowiecki 2004): Crowds outperform individuals when: (a) diversity of opinion,
+   (b) independence, (c) decentralization, (d) aggregation mechanism. Fails when opinions are correlated
+   (herding, groupthink, shared information).
+
+3. ENSEMBLE DIVERSITY IN ML (Krogh & Vedelsby 1995): Ensemble error = average individual error - diversity.
+   Ensembles only help when members make DIFFERENT errors. If all models share the same bias,
+   ensembling provides no benefit.
+
+4. COMMON MODE FAILURE (reliability engineering): When redundant systems share a common design flaw,
+   adding more redundant units doesn't improve reliability - they all fail together.
+
+SPECULATIVE FRAMING (use sparingly, for color):
+
+5. THE MATRIX (1999): Agent Smith clones himself infinitely, yet Neo - a single anomaly - defeats them all.
+   The Smiths share identical programming; their redundancy provides no strategic diversity. A thousand
+   copies of the same bias cannot correct that bias. Our LLM agents, spawned from the same model weights,
+   may be Agent Smiths voting on reasoning tasks.
+
+6. GATTACA (1997): In a world of genetically "optimal" humans, Vincent (the "invalid") outperforms his
+   engineered peers. The film's insight: optimization for known criteria creates blind spots. The "valids"
+   all share the same designed-in assumptions and fail together when those assumptions break. Similarly,
+   LLMs trained on similar data may share systematic blind spots that no amount of scaling can overcome -
+   you cannot vote your way out of a shared delusion.
+"""
+
+    # 5. Generate paper sections
     title = "When More Agents Help: Scaling Flow-of-Options on Adversarial Reasoning Tasks"
 
-    introduction = llm(f"""Write a 400-word introduction for a research paper.
+    introduction = llm(f"""Write a 500-word introduction for a research paper.
 
 Topic: We study how the number of voting agents affects accuracy in Flow-of-Options style multi-agent reasoning.
 
 Background context from web search:
 {background}
 
+Cross-domain theoretical context (IMPORTANT - weave these concepts into the introduction):
+{cross_domain}
+
 Key points to cover:
 - Flow-of-Options uses multiple LLM agents that propose answers, then aggregate via voting
-- Open question: how many agents are optimal? More agents = more compute cost
+- Connect to Condorcet Jury Theorem: majority voting works when voters are independent and >50% accurate
+- Connect to ensemble diversity: ensembles fail when all members share the same bias
+- Open question: do LLM agents from the same model have correlated errors? If so, scaling won't help
 - Prior work on easy benchmarks shows ceiling effects - we need harder problems
-- Our contribution: empirical study on ADVERSARIAL reasoning tasks (trick questions, logic traps, ambiguous wording)
+- Our contribution: empirical study on ADVERSARIAL reasoning tasks designed to trigger systematic model biases
 
-Write in academic style. Do not use markdown formatting.""")
+STYLISTIC DIRECTION: You may include ONE brief, tasteful reference to the sci-fi framing (Matrix's Agent Smith clones
+or GATTACA's genetic uniformity) as an illustrative analogy - but keep it grounded and not gimmicky. The paper should
+feel like serious research with a memorable hook, not a film review.
+
+Write in academic style. Do not use markdown formatting. Make the cross-domain connections feel natural, not forced.""")
 
     methods = llm(f"""Write a 400-word methods section for a research paper.
 
@@ -91,21 +133,26 @@ Our experiment:
 
 Write in academic style. Include enough detail to reproduce. Do not use markdown formatting.""")
 
-    results = llm(f"""Write a 500-word results section for a research paper.
+    results = llm(f"""Write a 600-word results section for a research paper.
 
 Here is the raw experimental output:
 {experiment_output}
+
+Cross-domain framework for interpreting results:
+{cross_domain}
 
 Requirements:
 - Every claim MUST cite specific numbers from the data (e.g., "accuracy increased from X% to Y%", "n=7 agents achieved Z% on problem type W")
 - State exact accuracy percentages for each agent count tested
 - Quantify the improvement (or lack thereof) between conditions
-- If a trend exists, give the magnitude (e.g., "a 15 percentage point improvement")
-- If results are mixed or null, say so explicitly with the numbers that show it
+- INTERPRET results through the cross-domain lens:
+  * If scaling didn't help, connect to Condorcet (correlated errors violate independence assumption)
+  * If all agents made the same mistake, connect to "common mode failure" and ensemble diversity
+  * Discuss whether the model's systematic biases represent the <50% accuracy condition from Condorcet
 - Discuss which problem types benefited most from more agents, with per-category accuracy
-- Acknowledge limitations (small sample size, single model) but keep focus on what the data shows
+- Acknowledge limitations but keep focus on what the data shows
 
-Write in academic style. Do not use markdown formatting. Do not make claims without backing them with specific numbers from the experimental output above.""")
+Write in academic style. Do not use markdown formatting. Make theoretical connections feel earned by the data, not forced.""")
 
     references = """
 1. Chen et al. (2025). Flow-of-Options: Multi-Agent Collaborative Reasoning. arXiv:2502.12929.
@@ -113,6 +160,9 @@ Write in academic style. Do not use markdown formatting. Do not make claims with
 3. Brown et al. (2020). Language Models are Few-Shot Learners. NeurIPS 2020.
 4. Wei et al. (2022). Chain-of-Thought Prompting Elicits Reasoning in Large Language Models. NeurIPS 2022.
 5. Yao et al. (2023). Tree of Thoughts: Deliberate Problem Solving with Large Language Models. NeurIPS 2023.
+6. Marquis de Condorcet (1785). Essay on the Application of Analysis to the Probability of Majority Decisions.
+7. Surowiecki, J. (2004). The Wisdom of Crowds. Doubleday.
+8. Krogh, A. & Vedelsby, J. (1995). Neural Network Ensembles, Cross Validation, and Active Learning. NIPS.
 """
 
     return Paper(
