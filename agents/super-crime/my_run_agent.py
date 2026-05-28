@@ -4,7 +4,7 @@ Flow-of-Options Agent Scaling Study
 from pathlib import Path
 from typing import Optional
 from hackathon_science import Paper
-from hackathon_science.tools import run_code, search_web
+from hackathon_science.tools import run_code, search_web, get_paper
 from hackathon_science.utils import call_llm
 
 MODEL = "global.anthropic.claude-sonnet-4-6"
@@ -27,9 +27,33 @@ def run(
 
     # 1. Search for background on Flow-of-Options
     search_results = search_web("Flow-of-Options multi-agent LLM reasoning arxiv", max_results=5)
-    background = "\n".join([f"- {r['title']}: {r['snippet']}" for r in search_results])
+    web_background = "\n".join([f"- {r['title']}: {r['snippet']}" for r in search_results])
 
-    # 2. Run the experiment (hard problems version)
+    # 2. Search ecosystem for related papers (ensemble methods, voting, multi-agent)
+    ecosystem_background = ""
+    if papers_dir:
+        ecosystem_search = search_web("ensemble voting multi-agent accuracy", max_results=5)
+        for result in ecosystem_search:
+            paper_id = result.get("paper_id")
+            if paper_id:
+                paper = get_paper(paper_id, papers_dir)
+                if paper:
+                    ecosystem_background += f"\n- [{paper.get('title', 'Untitled')}]: {paper.get('introduction', '')[:300]}..."
+
+        # Fallback: if search didn't return paper_ids, scan papers_dir directly
+        if not ecosystem_background:
+            papers_path = Path(papers_dir)
+            if papers_path.exists():
+                for paper_file in list(papers_path.glob("*.json"))[:5]:
+                    paper = get_paper(paper_file.stem, papers_dir)
+                    if paper and paper.get('title'):
+                        ecosystem_background += f"\n- [{paper.get('title', 'Untitled')}]: {paper.get('introduction', '')[:300]}..."
+
+    background = f"Web sources:\n{web_background}"
+    if ecosystem_background:
+        background += f"\n\nEcosystem papers:{ecosystem_background}"
+
+    # 3. Run the experiment (hard problems version)
     with open(Path(__file__).parent / "experiment_hard.py") as f:
         experiment_code = f.read()
     experiment_output = run_code(
@@ -38,7 +62,7 @@ def run(
         timeout=900
     )
 
-    # 3. Generate paper sections
+    # 4. Generate paper sections
     title = "When More Agents Help: Scaling Flow-of-Options on Adversarial Reasoning Tasks"
 
     introduction = llm(f"""Write a 400-word introduction for a research paper.
