@@ -8,9 +8,9 @@ from typing import Optional
 from hackathon_science import Paper
 from hackathon_science.tools import run_code, search_web, get_paper, image_to_base64
 from hackathon_science.utils import call_llm
-from tools import (
+from hackathon_science.customtools import (
     fetch_ecosystem_papers,
-    llm_text, extract_score, extract_code, has_error, score_paper,
+    llm_text, extract_score, extract_code, has_error, score_paper, in_scope,
     META_CONTEXT,
 )
 
@@ -96,9 +96,17 @@ def run(
         if scored:
             local_scored.append(scored)
 
-    # Take only the top 3 across both sources and append to the web pool
+    # Take only the top 3 across both sources and append to the web pool,
+    # discarding any papers that fall outside the problem_domain scope.
     if local_scored:
-        top_local = sorted(local_scored, key=lambda x: x[0], reverse=True)[:3]
+        filtered = []
+        for score, result in local_scored:
+            scope_text = f"{result['title']}. {result['snippet']}"
+            if in_scope(scope_text, problem_domain, FAST_MODEL_ID):
+                filtered.append((score, result))
+            else:
+                print(f"  Out of scope, discarded: {result['title'][:80]}")
+        top_local = sorted(filtered, key=lambda x: x[0], reverse=True)[:3]
         for score, result in top_local:
             search_results.append(result)
             score_results.append(score)
@@ -159,8 +167,13 @@ def run(
             model_id=FAST_MODEL_ID,
         )
         question = llm_text(out_question)
-        questions.append(question)
-        print(f"  Q: {question[:100]}")
+
+        # Discard questions that fall outside the problem_domain scope
+        if in_scope(question, problem_domain, FAST_MODEL_ID):
+            questions.append(question)
+            print(f"  Q: {question[:100]}")
+        else:
+            print(f"  Q discarded (out of scope): {question[:100]}")
 
     # ------------------------------------------------------------------
     # 5. Synthesise a single best research question — OUTSIDE the loop

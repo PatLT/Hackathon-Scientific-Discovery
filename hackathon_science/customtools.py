@@ -87,6 +87,26 @@ META_CONTEXT = (
 )
 
 
+def in_scope(text: str, problem_domain: str, model_id: str) -> bool:
+    """Return True if text (a paper title/abstract or a question) falls within
+    the scope of problem_domain, False otherwise.
+
+    A False result should cause the caller to zero-out the item's score or
+    discard the question entirely.
+    """
+    prompt = (
+        f"Does the following text fall within the scientific scope of the domain "
+        f"'{problem_domain}'? Answer with a single word: YES or NO.\n\n"
+        f"Text: {text[:500]}"
+    )
+    out    = call_llm(
+        messages=[{"role": "user", "content": [{"text": prompt}]}],
+        model_id=model_id,
+    )
+    answer = llm_text(out).strip().upper()
+    return answer.startswith("YES")
+
+
 def score_paper(
     paper: dict,
     problem_domain: str,
