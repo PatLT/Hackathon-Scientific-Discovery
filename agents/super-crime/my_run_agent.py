@@ -270,14 +270,23 @@ ENSEMBLE THEORY:
     if ecosystem_background:
         background += f"\n\nECOSYSTEM PAPERS (from this hackathon - IMPORTANT: cite these!):\n{ecosystem_background}"
 
-    # 3. Run the experiment (expanded 30-problem benchmark)
+    # 3. Load experiment code and results
     with open(Path(__file__).parent / "experiment_hard.py") as f:
         experiment_code = f.read()
-    experiment_output = run_code(
-        code=experiment_code,
-        filename="experiment.py",
-        timeout=1800
-    )
+
+    # Try to load pre-computed results first (experiment takes 20+ min to run)
+    results_file = Path(__file__).parent.parent.parent / "experiment_results.txt"
+    if results_file.exists():
+        print("Loading pre-computed experiment results...")
+        with open(results_file) as f:
+            experiment_output = f.read()
+    else:
+        print("Running experiment (this may take 20+ minutes)...")
+        experiment_output = run_code(
+            code=experiment_code,
+            filename="experiment.py",
+            timeout=1800
+        )
 
     # 4. Cross-domain theoretical background (hardcoded - these are established concepts)
     cross_domain = """
