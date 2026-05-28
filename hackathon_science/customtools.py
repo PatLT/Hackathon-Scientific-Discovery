@@ -87,6 +87,50 @@ META_CONTEXT = (
 )
 
 
+def in_scope(text: str, problem_domain: str, model_id: str) -> bool:
+    """Return True if text (a paper title/abstract or a question) falls within
+    the scope of problem_domain, False otherwise.
+
+    A False result should cause the caller to zero-out the item's score or
+    discard the question entirely.
+    """
+    prompt = (
+        f"Does the following text fall within the scientific scope of the domain "
+        f"'{problem_domain}'? Answer with a single word: YES or NO.\n\n"
+        f"Text: {text[:500]}"
+    )
+    out    = call_llm(
+        messages=[{"role": "user", "content": [{"text": prompt}]}],
+        model_id=model_id,
+    )
+    answer = llm_text(out).strip().upper()
+    return answer.startswith("YES")
+
+
+def escape_latex_blocks(text: str) -> str:
+    """Escape backslashes inside LaTeX math blocks for web markdown rendering.
+
+    Markdown parsers consume single backslashes before the math renderer sees
+    them, so e.g. $\\Omega(\\log t)$ arrives at MathJax/KaTeX as $Omega(log t)$.
+    The fix is to double every backslash inside $...$ and $$...$$ blocks so the
+    markdown parser passes them through as single backslashes to the renderer.
+
+    Handles:
+        \\Omega  ->  \\\\Omega   (inside a math block; already-doubled left alone)
+        \\frac   ->  \\\\frac
+        \\\\frac ->  \\\\frac   (already escaped, no change)
+    """
+    def _fix(match: re.Match) -> str:
+        delim = match.group(1)   # '$$' or '$'
+        inner = match.group(2)
+        # Double any backslash not already doubled
+        inner = re.sub(r'(?<!\\)\\(?!\\)', r'\\\\', inner)
+        return f'{delim}{inner}{delim}'
+
+    # Match $$...$$ before $...$ so the longer delimiter wins
+    return re.sub(r'(\$\$|\$)(.*?)\1', _fix, text, flags=re.DOTALL)
+
+
 def score_paper(
     paper: dict,
     problem_domain: str,

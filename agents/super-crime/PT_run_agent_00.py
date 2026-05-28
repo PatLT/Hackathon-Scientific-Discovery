@@ -8,10 +8,10 @@ from typing import Optional
 from hackathon_science import Paper
 from hackathon_science.tools import run_code, search_web, get_paper, image_to_base64
 from hackathon_science.utils import call_llm
-from tools import (
+from hackathon_science.customtools import (
     fetch_ecosystem_papers,
-    llm_text, extract_score, extract_code, has_error, score_paper,
-    META_CONTEXT,
+    llm_text, extract_score, extract_code, has_error, score_paper, in_scope,
+    escape_latex_blocks, META_CONTEXT,
 )
 
 
@@ -96,9 +96,17 @@ def run(
         if scored:
             local_scored.append(scored)
 
-    # Take only the top 3 across both sources and append to the web pool
+    # Take only the top 3 across both sources and append to the web pool,
+    # discarding any papers that fall outside the problem_domain scope.
     if local_scored:
-        top_local = sorted(local_scored, key=lambda x: x[0], reverse=True)[:3]
+        filtered = []
+        for score, result in local_scored:
+            scope_text = f"{result['title']}. {result['snippet']}"
+            if in_scope(scope_text, problem_domain, FAST_MODEL_ID):
+                filtered.append((score, result))
+            else:
+                print(f"  Out of scope, discarded: {result['title'][:80]}")
+        top_local = sorted(filtered, key=lambda x: x[0], reverse=True)[:3]
         for score, result in top_local:
             search_results.append(result)
             score_results.append(score)
@@ -159,8 +167,13 @@ def run(
             model_id=FAST_MODEL_ID,
         )
         question = llm_text(out_question)
-        questions.append(question)
-        print(f"  Q: {question[:100]}")
+
+        # Discard questions that fall outside the problem_domain scope
+        if in_scope(question, problem_domain, FAST_MODEL_ID):
+            questions.append(question)
+            print(f"  Q: {question[:100]}")
+        else:
+            print(f"  Q discarded (out of scope): {question[:100]}")
 
     # ------------------------------------------------------------------
     # 5. Synthesise a single best research question — OUTSIDE the loop
@@ -177,7 +190,7 @@ def run(
         messages=[{"role": "user", "content": [{"text": synthesis_prompt}]}],
         model_id=MODEL_ID,
     )
-    research_question = llm_text(out_synthesis)
+    research_question = escape_latex_blocks(llm_text(out_synthesis))
     print(f"Research question: {research_question}")
 
     # ------------------------------------------------------------------
@@ -195,7 +208,7 @@ def run(
         messages=[{"role": "user", "content": [{"text": methods_prompt}]}],
         model_id=MODEL_ID,
     )
-    methods = llm_text(out_methods)
+    methods = escape_latex_blocks(llm_text(out_methods))
 
     # ------------------------------------------------------------------
     # 7. Write an experiment / analysis script and run it (with retry)
@@ -210,6 +223,10 @@ def run(
     messages = [{"role": "user", "content": [{"text": code_prompt}]}]
     out_code  = call_llm(messages=messages, model_id=MODEL_ID)
     code_text = llm_text(out_code)
+
+    # Snapshot existing PNGs before running so we can detect newly created ones
+    from pathlib import Path as _Path
+    pngs_before = set(_Path(".").glob("*.png"))
 
     # run_code accepts raw LLM responses (including markdown fences) directly.
     # If execution fails, feed the error back to the LLM and retry up to 3 times.
@@ -239,22 +256,63 @@ def run(
         out_code  = call_llm(messages=messages, model_id=MODEL_ID)
         code_text = llm_text(out_code)
 
+    # Collect any PNGs created during the experiment run
+    new_pngs = sorted(set(_Path(".").glob("*.png")) - pngs_before)
+    print(f"  {len(new_pngs)} new figure(s) detected: {[p.name for p in new_pngs]}")
+
+    # Generate a caption for each figure
+    figures = []   # [(caption, base64_markdown)]
+    for i, png_path in enumerate(new_pngs, 1):
+        caption_prompt = (
+            f"You are captioning Figure {i} for a scientific paper addressing the "
+            f'research question: "{research_question}"\n\n'
+            f"The figure was saved as '{png_path.name}' by the experiment script. "
+            f"Write a single concise figure caption (1-2 sentences) that describes "
+            f"what the figure likely shows and its relevance to the research question. "
+            f"Begin the caption with 'Figure {i}:'"
+        )
+        out_caption = call_llm(
+            messages=[{"role": "user", "content": [{"text": caption_prompt}]}],
+            model_id=FAST_MODEL_ID,
+        )
+        caption   = llm_text(out_caption)
+        fig_md    = image_to_base64(str(png_path), alt_text=caption)
+        figures.append((caption, fig_md))
+        print(f"  Captioned: {caption[:80]}")
+
     # ------------------------------------------------------------------
     # 8. Interpret results
     # ------------------------------------------------------------------
     print("Interpreting results...")
+
+    # Build a figure summary to pass to the LLM so it can reference figures by number
+    figure_refs = ""
+    if figures:
+        figure_refs = "\n\nThe following figures were produced by the experiment:\n" + \
+            "\n".join(f"  Figure {i}: {cap}" for i, (cap, _) in enumerate(figures, 1))
+
     results_prompt = (
         f"The following experiment was run to address the research question:\n"
         f'"{research_question}"\n\n'
-        f"Experiment output:\n{code_output}\n\n"
-        f"Write a Results section for a scientific paper interpreting these "
-        f"findings clearly and concisely."
+        f"Experiment output:\n{code_output}"
+        f"{figure_refs}\n\n"
+        f"Write a Results section for a scientific paper interpreting these findings "
+        f"clearly and concisely. Where relevant, refer to the figures by number "
+        f"(e.g. 'Figure 1 shows...') to support your interpretation."
     )
     out_results = call_llm(
         messages=[{"role": "user", "content": [{"text": results_prompt}]}],
         model_id=MODEL_ID,
     )
-    results = llm_text(out_results)
+    results = escape_latex_blocks(llm_text(out_results))
+
+    # Append all figures (base64 markdown + caption) at the end of the results section
+    if figures:
+        fig_block = "\n\n---\n\n" + "\n\n".join(
+            f"{fig_md}\n\n*{caption}*"
+            for caption, fig_md in figures
+        )
+        results += fig_block
 
     # ------------------------------------------------------------------
     # 9. Write introduction from collected summaries
@@ -270,7 +328,7 @@ def run(
         messages=[{"role": "user", "content": [{"text": intro_prompt}]}],
         model_id=MODEL_ID,
     )
-    introduction = llm_text(out_intro)
+    introduction = escape_latex_blocks(llm_text(out_intro))
 
     # ------------------------------------------------------------------
     # 10. Build references list
@@ -292,6 +350,6 @@ def run(
         methods=methods,
         results=results,
         references=references,
-        appendix=extract_code(code_text),
+        appendix="",
         tags=[],
     )
