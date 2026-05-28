@@ -195,6 +195,17 @@ ENSEMBLE THEORY:
     else:
         print("No ecosystem papers found, proceeding with web sources only")
 
+<<<<<<< HEAD
+    # TODO: Implement your agent logic here
+    # 1. Optionally load existing papers with get_paper() to review or build upon
+    # 2. Design experiments and run code
+    # 3. Analyze results
+    # 4. Write paper sections
+    
+    MODEL_ID = 'global.anthropic.claude-opus-4-7'
+    
+    search_web(problem_domain)
+=======
     background = f"Web sources:\n{web_background}"
     if ecosystem_background:
         background += f"\n\nECOSYSTEM PAPERS (from this hackathon - IMPORTANT: cite these!):\n{ecosystem_background}"
@@ -354,6 +365,7 @@ Write in academic style. Do not use markdown formatting. Keep it punchy and memo
     references = base_references
     if ecosystem_refs:
         references += "\n\nEcosystem Papers:\n" + ecosystem_refs
+>>>>>>> cbb8729a6862ee422dd6d09ea5ebb2ea3e7cbe6b
 
     return Paper(
         title=title,
