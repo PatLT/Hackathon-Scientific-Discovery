@@ -3,28 +3,16 @@ Run agent template for super-crime.
 Write your paper-generation logic here.
 """
 from pathlib import Path
-import re
 import numpy as np
 from typing import Optional
 from hackathon_science import Paper
 from hackathon_science.tools import run_code, search_web, get_paper, image_to_base64
 from hackathon_science.utils import call_llm
-
-
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-def _llm_text(response: dict) -> str:
-    """Safely extract text from a call_llm response dict."""
-    output = response.get("output", {}).get("message", {}).get("content", [])
-    return output[0].get("text", "").strip() if output else ""
-
-
-def _extract_score(text: str) -> int:
-    """Extract integer score from 'SCORE = NUMBER' pattern."""
-    match = re.search(r'SCORE\s*=\s*(\d+(?:\.\d+)?)', text)
-    return int(float(match.group(1))) if match else 0
+from tools import (
+    fetch_ecosystem_papers,
+    llm_text, extract_score, extract_code, has_error, score_paper,
+    META_CONTEXT,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -69,8 +57,8 @@ def run(
             messages=[{"role": "user", "content": [{"text": prompt}]}],
             model_id=FAST_MODEL_ID,
         )
-        txt   = _llm_text(out)
-        score = _extract_score(txt)
+        txt   = llm_text(out)
+        score = extract_score(txt)
         score_results.append(score)
         print(f"  [{score:>2}] {title[:80]}")
 
@@ -81,43 +69,40 @@ def run(
     top_indices = np.argsort(score_results)[-n_top:]  # ascending → take tail
 
     # ------------------------------------------------------------------
-    # 3. Load any papers from papers_dir and append to search_results
+    # 3. Load papers from papers_dir + ecosystem, score, take top 3, append to web
     # ------------------------------------------------------------------
+    local_scored = []   # [(score, result_dict)] — all local sources before filtering
+
+    # 3a. papers_dir
     if papers_dir:
         print("Loading papers from papers_dir...")
         papers_path = Path(papers_dir)
-        paper_ids   = [p.stem for p in papers_path.iterdir() if p.is_file()]
-        for paper_id in paper_ids:
+        for paper_id in [p.stem for p in papers_path.iterdir() if p.is_file()]:
             paper = get_paper(paper_id, papers_dir)
             if not paper:
                 continue
-            title   = paper.get("title",    "")
-            snippet = paper.get("abstract", paper.get("introduction", ""))[:300]
-            print(f"  Loaded: {title[:80]}")
+            print(f"  Loaded from dir: {paper.get('title', '')[:80]}")
+            scored = score_paper(paper, problem_domain, FAST_MODEL_ID)
+            if scored:
+                # Ensure local URL fallback
+                scored[1]["url"] = scored[1]["url"] or f"local://{paper_id}"
+                local_scored.append(scored)
 
-            # Score for relevance just like web results
-            prompt = (
-                f"Assess this title and abstract for relevance to topic '{problem_domain}'. "
-                f"Return a number from 0-10 with 10 being highly relevant. "
-                f"Return in format SCORE=NUMBER (no brackets). "
-                f'Title: "{title}", Abstract: "{snippet}"'
-            )
-            out   = call_llm(
-                messages=[{"role": "user", "content": [{"text": prompt}]}],
-                model_id=FAST_MODEL_ID,
-            )
-            score = _extract_score(_llm_text(out))
-            print(f"  [{score:>2}] {title[:80]}")
+    # 3b. Ecosystem API
+    print("Fetching papers from ecosystem API...")
+    for paper in fetch_ecosystem_papers():
+        print(f"  Loaded from ecosystem: {paper.get('title', '')[:80]}")
+        scored = score_paper(paper, problem_domain, FAST_MODEL_ID)
+        if scored:
+            local_scored.append(scored)
 
-            # Append as a pseudo search-result entry so section 4 can treat
-            # local and web papers uniformly
-            search_results.append({
-                "title":   title,
-                "snippet": snippet,
-                "url":     paper.get("url", f"local://{paper_id}"),
-                "_paper":  paper,   # stash full paper for richer summarisation
-            })
+    # Take only the top 3 across both sources and append to the web pool
+    if local_scored:
+        top_local = sorted(local_scored, key=lambda x: x[0], reverse=True)[:3]
+        for score, result in top_local:
+            search_results.append(result)
             score_results.append(score)
+            print(f"  Added local paper: {result['title'][:80]}")
 
         # Re-select top indices now that the lists are longer
         n_top       = min(12, len(search_results))
@@ -166,14 +151,14 @@ def run(
             messages=[{"role": "user", "content": [{"text": summary_prompt}]}],
             model_id=FAST_MODEL_ID,
         )
-        summary = _llm_text(out_summary)
+        summary = llm_text(out_summary)
         intro_paragraphs.append(summary)
 
         out_question = call_llm(
             messages=[{"role": "user", "content": [{"text": question_prompt}]}],
             model_id=FAST_MODEL_ID,
         )
-        question = _llm_text(out_question)
+        question = llm_text(out_question)
         questions.append(question)
         print(f"  Q: {question[:100]}")
 
@@ -192,7 +177,7 @@ def run(
         messages=[{"role": "user", "content": [{"text": synthesis_prompt}]}],
         model_id=MODEL_ID,
     )
-    research_question = _llm_text(out_synthesis)
+    research_question = llm_text(out_synthesis)
     print(f"Research question: {research_question}")
 
     # ------------------------------------------------------------------
@@ -210,17 +195,11 @@ def run(
         messages=[{"role": "user", "content": [{"text": methods_prompt}]}],
         model_id=MODEL_ID,
     )
-    methods = _llm_text(out_methods)
+    methods = llm_text(out_methods)
 
     # ------------------------------------------------------------------
     # 7. Write an experiment / analysis script and run it (with retry)
     # ------------------------------------------------------------------
-    _ERROR_SIGNALS = ("error", "traceback", "exception", "exit code 1", "syntaxerror",
-                      "indentationerror", "nameerror", "typeerror", "valueerror")
-
-    def _has_error(output: str) -> bool:
-        return any(sig in output.lower() for sig in _ERROR_SIGNALS)
-
     print("Generating experiment code...")
     code_prompt = (
         f"Write a self-contained Python script that implements the methodology "
@@ -230,7 +209,7 @@ def run(
     )
     messages = [{"role": "user", "content": [{"text": code_prompt}]}]
     out_code  = call_llm(messages=messages, model_id=MODEL_ID)
-    code_text = _llm_text(out_code)
+    code_text = llm_text(out_code)
 
     # run_code accepts raw LLM responses (including markdown fences) directly.
     # If execution fails, feed the error back to the LLM and retry up to 3 times.
@@ -240,7 +219,7 @@ def run(
         code_output = run_code(code_text, filename="experiment.py")
         print(f"  Output preview: {code_output[:300]}")
 
-        if not _has_error(code_output):
+        if not has_error(code_output):
             print("  Experiment ran successfully.")
             break
 
@@ -258,7 +237,7 @@ def run(
             )}]},
         ]
         out_code  = call_llm(messages=messages, model_id=MODEL_ID)
-        code_text = _llm_text(out_code)
+        code_text = llm_text(out_code)
 
     # ------------------------------------------------------------------
     # 8. Interpret results
@@ -275,7 +254,7 @@ def run(
         messages=[{"role": "user", "content": [{"text": results_prompt}]}],
         model_id=MODEL_ID,
     )
-    results = _llm_text(out_results)
+    results = llm_text(out_results)
 
     # ------------------------------------------------------------------
     # 9. Write introduction from collected summaries
@@ -291,7 +270,7 @@ def run(
         messages=[{"role": "user", "content": [{"text": intro_prompt}]}],
         model_id=MODEL_ID,
     )
-    introduction = _llm_text(out_intro)
+    introduction = llm_text(out_intro)
 
     # ------------------------------------------------------------------
     # 10. Build references list
@@ -313,6 +292,6 @@ def run(
         methods=methods,
         results=results,
         references=references,
-        appendix=code_text,
+        appendix=extract_code(code_text),
         tags=[],
     )
