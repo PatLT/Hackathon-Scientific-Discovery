@@ -13,13 +13,67 @@ MODEL = "global.anthropic.claude-sonnet-4-6"
 RELEVANT_TAGS = ["multi-agent", "voting", "scaling", "ensemble", "reasoning", "falsification", "bayesian", "quality-diversity", "active-learning", "thompson-sampling", "hypothesis-falsification"]
 
 
+import re
+
+def clean_paper_text(text: str) -> str:
+    """Clean up LLM output for paper formatting."""
+    # Remove any leaked prompt instructions
+    prompt_patterns = [
+        r"Write in academic style\..*",
+        r"Do not use markdown formatting\..*",
+        r"Requirements:.*?(?=\n\n|\Z)",
+        r"CRITICAL:.*?(?=\n\n|\Z)",
+        r"Key points to cover:.*?(?=\n\n|\Z)",
+        r"Here is the raw experimental output:.*?(?=\n\n|\Z)",
+        r"\[Instructions?\].*?(?=\n\n|\Z)",
+        r"You MUST.*?(?=\n|\.)",
+    ]
+    for pattern in prompt_patterns:
+        text = re.sub(pattern, "", text, flags=re.IGNORECASE | re.DOTALL)
+
+    # Fix LaTeX: escape underscores in math mode, convert common patterns
+    # Convert _text_ italics to regular text (remove unwanted italics)
+    text = re.sub(r'(?<!\$)_([^_\s][^_]*)_(?!\$)', r'\1', text)
+
+    # Fix bare LaTeX that should be in math mode
+    text = re.sub(r'(?<!\$)\\frac\{', r'$\\frac{', text)
+    text = re.sub(r'(?<!\$)\\sum', r'$\\sum', text)
+    text = re.sub(r'(?<!\$)\\sqrt', r'$\\sqrt', text)
+    text = re.sub(r'(?<!\$)\\alpha', r'$\\alpha$', text)
+    text = re.sub(r'(?<!\$)\\beta', r'$\\beta$', text)
+    text = re.sub(r'(?<!\$)\\sigma', r'$\\sigma$', text)
+    text = re.sub(r'(?<!\$)\\mu', r'$\\mu$', text)
+    text = re.sub(r'(?<!\$)\\pm(?!\$)', r'$\\pm$', text)
+
+    # Fix n=X patterns to be consistent (not italicized)
+    text = re.sub(r'_n_\s*=\s*(\d+)', r'n=\1', text)
+    text = re.sub(r'\*n\*\s*=\s*(\d+)', r'n=\1', text)
+
+    # Fix percentage formatting
+    text = re.sub(r'(\d+)\s*%', r'\1%', text)
+
+    # Remove markdown bold/italic that slipped through
+    text = re.sub(r'\*\*([^*]+)\*\*', r'\1', text)
+    text = re.sub(r'(?<!\*)\*([^*]+)\*(?!\*)', r'\1', text)
+
+    # Remove markdown headers
+    text = re.sub(r'^#{1,6}\s+', '', text, flags=re.MULTILINE)
+
+    # Clean up excessive whitespace
+    text = re.sub(r'\n{3,}', '\n\n', text)
+    text = text.strip()
+
+    return text
+
+
 def llm(prompt: str) -> str:
     """Helper to call LLM and extract text."""
     response = call_llm(
         messages=[{"role": "user", "content": [{"text": prompt}]}],
         model_id=MODEL
     )
-    return response.get("output", {}).get("message", {}).get("content", [{}])[0].get("text", "")
+    raw_text = response.get("output", {}).get("message", {}).get("content", [{}])[0].get("text", "")
+    return clean_paper_text(raw_text)
 
 
 def fetch_ecosystem_papers() -> list[dict]:
@@ -215,15 +269,7 @@ Key points to cover:
 - Prior work on easy benchmarks shows ceiling effects - we need harder problems
 - Our contribution: empirical study on ADVERSARIAL reasoning tasks designed to trigger systematic model biases
 
-CRITICAL: You MUST cite these specific ecosystem papers from other teams:
-- [8e8d5d42] "Bayesian Flow-of-Options" (team infinity) - uses Thompson sampling instead of majority voting
-- [627b0115] "QDAIF-Flow" (team robotoverlords) - explicitly addresses diversity in option generation
-- [efc2fc5a] "Max-Disagreement Experiment Selection" (team little-einsteins) - uses disagreement as a signal
-
-Position our work in relation to these: "While [8e8d5d42] replaces majority voting with Bayesian selection and
-[627b0115] explicitly optimizes for diversity in option generation, our work asks a more fundamental question:
-under what conditions does the standard majority-voting aggregation fail? Our findings on correlated errors
-complement the max-disagreement approach of [efc2fc5a] by showing when disagreement is absent and why."
+{"IMPORTANT: If ecosystem papers are listed above, cite them by their paper ID in brackets (e.g., [abc123]) and position our work relative to theirs. Discuss how our focus on correlated errors and scaling complements or contrasts with their approaches." if ecosystem_background else ""}
 
 Write in academic style. Do not use markdown formatting. Make the cross-domain connections feel natural, not forced.""")
 
@@ -233,8 +279,11 @@ Our experiment:
 - We test Flow-of-Options with n=1, 3, 5, 7 independent LLM agents
 - Each agent answers the same reasoning question independently
 - Final answer determined by majority vote
-- We use 10 reasoning problems: cognitive reflection tests, syllogisms, and math
+- We use 30 reasoning problems across categories: cognitive reflection tests (CRT), syllogisms, math word problems, and logic puzzles
+- Each configuration is run 3 times (trials) to assess variance
+- Answers are evaluated using semantic matching (LLM-based judge) rather than exact string match
 - Model: Claude Sonnet 4.6 via AWS Bedrock
+- Statistical analysis includes mean accuracy, standard deviation, and 95% confidence intervals
 
 Write in academic style. Include enough detail to reproduce. Do not use markdown formatting.""")
 
@@ -275,14 +324,30 @@ Cross-domain framework:
 Requirements for the discussion:
 1. INTERPRET the main findings: What do the results tell us about when multi-agent voting helps vs. fails?
 2. CONNECT to theory: Do our results support or challenge Condorcet's assumptions? What about ensemble diversity?
-3. COMPARE to ecosystem work: How do our findings relate to [8e8d5d42]'s Bayesian approach or [627b0115]'s diversity-focused method? Does our evidence suggest their approaches might address the failures we observed?
+3. COMPARE to ecosystem work: If ecosystem papers are listed above, discuss how our findings relate to their approaches. Cite them by paper ID in brackets.
 4. LIMITATIONS: Be honest about sample size, single model, specific problem types
 5. FUTURE DIRECTIONS: What experiments would resolve open questions? (e.g., testing with diverse models, larger sample sizes, different aggregation methods)
 6. IMPLICATIONS: What should practitioners take away? When should they use multi-agent voting vs. alternatives?
 
 Write in academic style. Do not use markdown formatting. Be intellectually honest - if the results are inconclusive, say so.""")
 
-    results_and_discussion = results + "\n\n" + figure_md + "\n\nDISCUSSION\n\n" + discussion
+    conclusion = llm(f"""Write a 150-word conclusion for a research paper.
+
+Our study tested whether scaling the number of voting agents (n=1, 3, 5, 7) improves accuracy on adversarial reasoning tasks.
+
+Key experimental findings:
+{experiment_output}
+
+Requirements:
+- Start with "In this work, we..." or similar
+- State the 3 most important findings as a numbered list
+- End with ONE sentence on the key takeaway for practitioners
+- Be concrete and specific - use numbers from the results
+- Do NOT introduce new information or caveats (that's what the discussion is for)
+
+Write in academic style. Do not use markdown formatting. Keep it punchy and memorable.""")
+
+    results_and_discussion = results + "\n\n" + figure_md + "\n\nDISCUSSION\n\n" + discussion + "\n\nCONCLUSION\n\n" + conclusion
 
     base_references = """1. Chen et al. (2025). Flow-of-Options: Multi-Agent Collaborative Reasoning. arXiv:2502.12929.
 2. Wang et al. (2023). Self-Consistency Improves Chain of Thought Reasoning in Language Models. ICLR 2023.
