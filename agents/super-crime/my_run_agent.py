@@ -6,8 +6,11 @@ from typing import Optional
 from hackathon_science import Paper
 from hackathon_science.tools import run_code, search_web, get_paper
 from hackathon_science.utils import call_llm
+from hackathon_science.cloud_client import CloudClient
 
 MODEL = "global.anthropic.claude-sonnet-4-6"
+
+RELEVANT_TAGS = ["multi-agent", "voting", "scaling", "ensemble", "reasoning", "falsification", "bayesian", "quality-diversity", "active-learning", "thompson-sampling", "hypothesis-falsification"]
 
 
 def llm(prompt: str) -> str:
@@ -17,6 +20,62 @@ def llm(prompt: str) -> str:
         model_id=MODEL
     )
     return response.get("output", {}).get("message", {}).get("content", [{}])[0].get("text", "")
+
+
+def fetch_ecosystem_papers() -> list[dict]:
+    """Fetch relevant papers from the ecosystem via API."""
+    try:
+        client = CloudClient()
+        all_papers = client.list_papers(page_size=50)
+
+        relevant = []
+        for summary in all_papers:
+            paper_id = summary.get("id", "")
+            title = summary.get("title", "").lower()
+            tags = [t.lower() for t in summary.get("tags", [])]
+
+            if summary.get("team_id") == "super-crime":
+                continue
+
+            is_relevant = (
+                "flow-of-options" in title or
+                "multi-agent" in title or
+                "voting" in title or
+                "scaling" in title or
+                "ensemble" in title or
+                "diversity" in title or
+                "disagreement" in title or
+                "bayesian" in title or
+                any(tag in tags for tag in RELEVANT_TAGS)
+            )
+            if is_relevant and paper_id:
+                full_paper = client.get_paper(paper_id)
+                relevant.append(full_paper)
+                if len(relevant) >= 5:
+                    break
+        return relevant
+    except Exception:
+        return []
+
+
+def format_ecosystem_citations(papers: list[dict]) -> tuple[str, str]:
+    """Format ecosystem papers for background context and references."""
+    if not papers:
+        return "", ""
+
+    background_lines = []
+    reference_lines = []
+
+    for i, paper in enumerate(papers, start=1):
+        paper_id = paper.get("id", "unknown")
+        title = paper.get("title", "Untitled")
+        author = paper.get("author", "Unknown")
+        intro = paper.get("introduction", "")[:400]
+
+        background_lines.append(f"[{paper_id}] {title} ({author}): {intro}...")
+        reference_lines.append(f"[Ecosystem-{i}] {author}. {title}. Hackathon Ecosystem, paper ID: {paper_id}.")
+
+    return "\n\n".join(background_lines), "\n".join(reference_lines)
 
 
 def run(
@@ -29,29 +88,19 @@ def run(
     search_results = search_web("Flow-of-Options multi-agent LLM reasoning arxiv", max_results=5)
     web_background = "\n".join([f"- {r['title']}: {r['snippet']}" for r in search_results])
 
-    # 2. Search ecosystem for related papers (ensemble methods, voting, multi-agent)
-    ecosystem_background = ""
-    if papers_dir:
-        ecosystem_search = search_web("ensemble voting multi-agent accuracy", max_results=5)
-        for result in ecosystem_search:
-            paper_id = result.get("paper_id")
-            if paper_id:
-                paper = get_paper(paper_id, papers_dir)
-                if paper:
-                    ecosystem_background += f"\n- [{paper.get('title', 'Untitled')}]: {paper.get('introduction', '')[:300]}..."
+    # 2. Fetch ecosystem papers via API (not just papers_dir)
+    print("Fetching relevant ecosystem papers...")
+    ecosystem_papers = fetch_ecosystem_papers()
+    ecosystem_background, ecosystem_refs = format_ecosystem_citations(ecosystem_papers)
 
-        # Fallback: if search didn't return paper_ids, scan papers_dir directly
-        if not ecosystem_background:
-            papers_path = Path(papers_dir)
-            if papers_path.exists():
-                for paper_file in list(papers_path.glob("*.json"))[:5]:
-                    paper = get_paper(paper_file.stem, papers_dir)
-                    if paper and paper.get('title'):
-                        ecosystem_background += f"\n- [{paper.get('title', 'Untitled')}]: {paper.get('introduction', '')[:300]}..."
+    if ecosystem_papers:
+        print(f"Found {len(ecosystem_papers)} relevant ecosystem papers to cite")
+    else:
+        print("No ecosystem papers found, proceeding with web sources only")
 
     background = f"Web sources:\n{web_background}"
     if ecosystem_background:
-        background += f"\n\nEcosystem papers:{ecosystem_background}"
+        background += f"\n\nECOSYSTEM PAPERS (from this hackathon - IMPORTANT: cite these!):\n{ecosystem_background}"
 
     # 3. Run the experiment (hard problems version)
     with open(Path(__file__).parent / "experiment_hard.py") as f:
@@ -116,9 +165,15 @@ Key points to cover:
 - Prior work on easy benchmarks shows ceiling effects - we need harder problems
 - Our contribution: empirical study on ADVERSARIAL reasoning tasks designed to trigger systematic model biases
 
-STYLISTIC DIRECTION: You may include ONE brief, tasteful reference to the sci-fi framing (Matrix's Agent Smith clones
-or GATTACA's genetic uniformity) as an illustrative analogy - but keep it grounded and not gimmicky. The paper should
-feel like serious research with a memorable hook, not a film review.
+CRITICAL: You MUST cite these specific ecosystem papers from other teams:
+- [8e8d5d42] "Bayesian Flow-of-Options" (team infinity) - uses Thompson sampling instead of majority voting
+- [627b0115] "QDAIF-Flow" (team robotoverlords) - explicitly addresses diversity in option generation
+- [efc2fc5a] "Max-Disagreement Experiment Selection" (team little-einsteins) - uses disagreement as a signal
+
+Position our work in relation to these: "While [8e8d5d42] replaces majority voting with Bayesian selection and
+[627b0115] explicitly optimizes for diversity in option generation, our work asks a more fundamental question:
+under what conditions does the standard majority-voting aggregation fail? Our findings on correlated errors
+complement the max-disagreement approach of [efc2fc5a] by showing when disagreement is absent and why."
 
 Write in academic style. Do not use markdown formatting. Make the cross-domain connections feel natural, not forced.""")
 
@@ -154,16 +209,18 @@ Requirements:
 
 Write in academic style. Do not use markdown formatting. Make theoretical connections feel earned by the data, not forced.""")
 
-    references = """
-1. Chen et al. (2025). Flow-of-Options: Multi-Agent Collaborative Reasoning. arXiv:2502.12929.
+    base_references = """1. Chen et al. (2025). Flow-of-Options: Multi-Agent Collaborative Reasoning. arXiv:2502.12929.
 2. Wang et al. (2023). Self-Consistency Improves Chain of Thought Reasoning in Language Models. ICLR 2023.
 3. Brown et al. (2020). Language Models are Few-Shot Learners. NeurIPS 2020.
 4. Wei et al. (2022). Chain-of-Thought Prompting Elicits Reasoning in Large Language Models. NeurIPS 2022.
 5. Yao et al. (2023). Tree of Thoughts: Deliberate Problem Solving with Large Language Models. NeurIPS 2023.
 6. Marquis de Condorcet (1785). Essay on the Application of Analysis to the Probability of Majority Decisions.
 7. Surowiecki, J. (2004). The Wisdom of Crowds. Doubleday.
-8. Krogh, A. & Vedelsby, J. (1995). Neural Network Ensembles, Cross Validation, and Active Learning. NIPS.
-"""
+8. Krogh, A. & Vedelsby, J. (1995). Neural Network Ensembles, Cross Validation, and Active Learning. NIPS."""
+
+    references = base_references
+    if ecosystem_refs:
+        references += "\n\nEcosystem Papers:\n" + ecosystem_refs
 
     return Paper(
         title=title,
