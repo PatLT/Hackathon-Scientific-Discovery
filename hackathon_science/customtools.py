@@ -62,9 +62,18 @@ def extract_score(text: str) -> int:
 
 def extract_code(text: str) -> str:
     """Extract only the code from an LLM response, stripping surrounding prose.
-    Looks for a fenced ```...``` block first; falls back to the raw text."""
+    Looks for a fenced ```...``` block first; if the response was truncated and
+    the closing fence is missing, takes everything after the opening fence;
+    falls back to the raw text if no fence is found at all."""
+    # Complete fenced block
     match = re.search(r'```(?:python)?\n(.*?)```', text, re.DOTALL)
-    return match.group(1).strip() if match else text.strip()
+    if match:
+        return match.group(1).strip()
+    # Truncated response — opening fence present but no closing fence
+    match = re.search(r'```(?:python)?\n(.*)', text, re.DOTALL)
+    if match:
+        return match.group(1).strip()
+    return text.strip()
 
 
 def has_error(output: str) -> bool:
