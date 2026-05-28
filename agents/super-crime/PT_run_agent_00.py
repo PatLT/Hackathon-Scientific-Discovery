@@ -213,8 +213,14 @@ def run(
     methods = _llm_text(out_methods)
 
     # ------------------------------------------------------------------
-    # 7. Write an experiment / analysis script and run it
+    # 7. Write an experiment / analysis script and run it (with retry)
     # ------------------------------------------------------------------
+    _ERROR_SIGNALS = ("error", "traceback", "exception", "exit code 1", "syntaxerror",
+                      "indentationerror", "nameerror", "typeerror", "valueerror")
+
+    def _has_error(output: str) -> bool:
+        return any(sig in output.lower() for sig in _ERROR_SIGNALS)
+
     print("Generating experiment code...")
     code_prompt = (
         f"Write a self-contained Python script that implements the methodology "
@@ -222,16 +228,37 @@ def run(
         f"plots as PNG files in the current directory.\n\n"
         f"Methodology:\n{methods}"
     )
-    out_code = call_llm(
-        messages=[{"role": "user", "content": [{"text": code_prompt}]}],
-        model_id=MODEL_ID,
-    )
+    messages = [{"role": "user", "content": [{"text": code_prompt}]}]
+    out_code  = call_llm(messages=messages, model_id=MODEL_ID)
     code_text = _llm_text(out_code)
 
-    # run_code accepts raw LLM output (including markdown fences) directly,
-    # extracts the code automatically, and saves it to the working directory.
-    code_output = run_code(code_text, filename="experiment.py")
-    print("Experiment output:\n", code_output[:500])
+    # run_code accepts raw LLM responses (including markdown fences) directly.
+    # If execution fails, feed the error back to the LLM and retry up to 3 times.
+    MAX_RETRIES = 3
+    for attempt in range(1, MAX_RETRIES + 1):
+        print(f"  Running experiment (attempt {attempt}/{MAX_RETRIES})...")
+        code_output = run_code(code_text, filename="experiment.py")
+        print(f"  Output preview: {code_output[:300]}")
+
+        if not _has_error(code_output):
+            print("  Experiment ran successfully.")
+            break
+
+        if attempt == MAX_RETRIES:
+            print("  Max retries reached — proceeding with error output.")
+            break
+
+        print(f"  Error detected, asking LLM to fix...")
+        # Extend the conversation so the LLM has full context
+        messages = messages + [
+            {"role": "assistant", "content": [{"text": code_text}]},
+            {"role": "user",      "content": [{"text": (
+                f"The script failed with the following error:\n\n{code_output}\n\n"
+                f"Please fix the code and return a corrected, complete Python script."
+            )}]},
+        ]
+        out_code  = call_llm(messages=messages, model_id=MODEL_ID)
+        code_text = _llm_text(out_code)
 
     # ------------------------------------------------------------------
     # 8. Interpret results
