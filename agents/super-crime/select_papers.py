@@ -8,50 +8,59 @@ from hackathon_science.utils import call_llm
 
 MODEL = "global.anthropic.claude-sonnet-4-6"
 
-SCORING_RUBRIC = """You are a paper selection judge for a scientific hackathon. Score this paper on 4 criteria (1-10 each):
+SCORING_RUBRIC = """You are a demanding peer reviewer for a scientific venue. Score this paper on 4 criteria (1-10 each), matching how real ML reviewers evaluate submissions:
 
-**1. Extension Alignment (weight: 0.35)**
-- Does the paper explicitly cite Flow-of-Options (Chen et al. 2025, arXiv:2502.12929)?
-- Does it extend, test, or critique FoO methodology (multi-agent voting, option generation)?
-- Is the connection substantive (experiments, theoretical analysis) or superficial (just mentions it)?
-Score 9-10: Core contribution is a direct FoO extension with experiments
-Score 6-8: Builds on FoO concepts but connection could be stronger
-Score 3-5: Mentions FoO but paper is mostly unrelated
-Score 1-2: No meaningful connection to FoO
+**1. Technical Quality (weight: 0.40)**
+This is THE most critical dimension. Reviewers consistently give 0/10 for:
+- No statistical testing (p-values, confidence intervals, effect sizes)
+- No repeated trials or variance analysis
+- Small sample sizes without power analysis
+- Missing ablations and sensitivity analysis
+- Incomplete reproducibility details (seeds, hyperparameters, hardware)
+- Unvalidated assumptions
+- Evaluation artifacts that confound results
+Score 9-10: Formal proofs OR rigorous experiments with statistical tests, confidence intervals, ablations, multiple baselines
+Score 6-8: Solid methodology but missing some rigor (e.g., no confidence intervals)
+Score 3-5: Experiments exist but lack statistical analysis, small N, limited baselines
+Score 1-2: No statistical testing, tiny dataset, acknowledged confounds, unreproducible
+Score 0: Major methodological flaw that invalidates conclusions
 
-**2. Dimension Balance (weight: 0.30)**
-- Technical rigor: Are methods sound, detailed, reproducible?
-- Novelty: Does it contribute something new beyond obvious variations?
-- Clarity: Is it well-written, organized, easy to follow?
-- Significance: Does the contribution matter? Would anyone cite this?
-Score 9-10: Strong on all 4 dimensions
-Score 6-8: Strong on 2-3 dimensions, adequate on others
-Score 3-5: Weak on multiple dimensions
-Score 1-2: Poorly written, trivial, or technically flawed
+**2. Novelty (weight: 0.25)**
+- Is this a new method, benchmark, theory, or substantial empirical finding?
+- Or does it repackage known intuitions with a small probe?
+- Is related work coverage comprehensive?
+Score 9-10: Novel method or surprising empirical discovery, comprehensive related work
+Score 6-8: Incremental but meaningful extension, decent positioning
+Score 3-5: Repackages known ideas, narrow related work
+Score 1-2: Well-known result, no new contribution
 
-**3. Ecosystem Engagement (weight: 0.20)**
-- Does it cite other teams' papers from this hackathon?
-- Does it build on or respond to ecosystem work?
-Score 9-10: Actively engages with multiple ecosystem papers
-Score 6-8: Cites 1-2 ecosystem papers meaningfully
-Score 3-5: Acknowledges ecosystem exists but doesn't engage
-Score 1-2: Completely isolated, no ecosystem awareness
+**3. Clarity (weight: 0.15)**
+- Well-written, organized, easy to follow?
+- Includes figures and tables (essential for empirical work)?
+- Notation is consistent and defined?
+Score 9-10: Excellent writing, useful visualizations, precise notation
+Score 6-8: Readable but missing figures/tables or some imprecision
+Score 3-5: Hard to follow, disorganized
+Score 1-2: Poorly written, confusing
 
-**4. Evidence Grounding (weight: 0.15)**
-- Are claims backed by specific data, numbers, or experiments?
-- Are there actual results (not just speculation or "future work")?
-Score 9-10: Quantitative results throughout, every claim has data
-Score 6-8: Has experiments but some claims lack support
-Score 3-5: More speculation than evidence
-Score 1-2: No experiments, pure speculation
+**4. Significance (weight: 0.20)**
+- Important problem? Timely?
+- Would this change how people think or work?
+- Actionable method others could adopt?
+Score 9-10: High-impact problem, demonstrates substantial advancement
+Score 6-8: Relevant problem, useful but limited contribution
+Score 3-5: Narrow interest, cautionary note rather than enabling result
+Score 1-2: Trivial problem or no practical value
+
+Be harsh like a real reviewer. Most hackathon papers score 0-1 on Technical Quality because they lack statistical rigor.
 
 Respond in this exact JSON format:
 {
-  "extension": <score 1-10>,
-  "dimensions": <score 1-10>,
-  "ecosystem": <score 1-10>,
-  "evidence": <score 1-10>,
-  "reasoning": "<2-3 sentences explaining the scores>"
+  "technical": <score 0-10>,
+  "novelty": <score 1-10>,
+  "clarity": <score 1-10>,
+  "significance": <score 1-10>,
+  "reasoning": "<2-3 sentences explaining scores, especially Technical Quality weaknesses>"
 }"""
 
 
@@ -103,13 +112,13 @@ REFERENCES:
         end = response.rfind("}") + 1
         scores = json.loads(response[start:end])
     except (json.JSONDecodeError, ValueError):
-        scores = {"extension": 5, "dimensions": 5, "ecosystem": 5, "evidence": 5, "reasoning": "Failed to parse LLM response"}
+        scores = {"technical": 0, "novelty": 3, "clarity": 5, "significance": 3, "reasoning": "Failed to parse LLM response"}
 
     weighted = (
-        scores.get("extension", 5) * 0.35 +
-        scores.get("dimensions", 5) * 0.30 +
-        scores.get("ecosystem", 5) * 0.20 +
-        scores.get("evidence", 5) * 0.15
+        scores.get("technical", 0) * 0.40 +
+        scores.get("novelty", 3) * 0.25 +
+        scores.get("clarity", 5) * 0.15 +
+        scores.get("significance", 3) * 0.20
     )
     scores["weighted"] = round(weighted, 2)
     scores["paper_id"] = paper.get("id", "unknown")
@@ -144,10 +153,10 @@ def main():
         print(f"\n#{i+1}: {paper['title']}")
         print(f"    ID: {paper['paper_id']}")
         print(f"    Weighted Score: {paper['weighted']}/10")
-        print(f"    - Extension:  {paper.get('extension', '?')}/10")
-        print(f"    - Dimensions: {paper.get('dimensions', '?')}/10")
-        print(f"    - Ecosystem:  {paper.get('ecosystem', '?')}/10")
-        print(f"    - Evidence:   {paper.get('evidence', '?')}/10")
+        print(f"    - Technical:    {paper.get('technical', '?')}/10")
+        print(f"    - Novelty:      {paper.get('novelty', '?')}/10")
+        print(f"    - Clarity:      {paper.get('clarity', '?')}/10")
+        print(f"    - Significance: {paper.get('significance', '?')}/10")
         print(f"    Reasoning: {paper.get('reasoning', 'N/A')}")
 
     if len(ranked) > 2:
